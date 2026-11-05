@@ -126,7 +126,7 @@ def _twist_queued_downs(*seconds: int) -> bytes:
         + struct.pack("<I", 9)
         + b"".join(
             (second * TICKS_PER_SECOND).to_bytes(6, byteorder="little")
-            + bytes([0x11, 0x00])
+            + bytes([0x11])
             for second in seconds
         )
     )

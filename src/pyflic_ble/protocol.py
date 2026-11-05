@@ -1303,34 +1303,31 @@ class TwistButtonEventV2:
 
     @classmethod
     def from_slot_bytes(cls, slot_data: bytes) -> TwistButtonEventV2:
-        """Parse from 8-byte slot (V2 format with mode index)."""
-        if len(slot_data) < 8:
+        """Parse from 7-byte slot (timestamp + event flags).
+
+        The real Twist firmware sends 7 bytes per button event:
+          bytes 0-5: 48-bit timestamp in 1/32768 second ticks
+          byte 6:    event flags (bits 0-3 event type, bit 4 was_queued,
+                     bit 5 was_queued_last)
+
+        There is no mode-index byte in the wire format; the handler tracks the
+        current twist mode from rotation notifications instead.
+        """
+        if len(slot_data) < 7:
             raise ValueError(f"Invalid Twist event slot size: {len(slot_data)}")
 
-        # Bytes 0-5: 48-bit timestamp in 1/32768 second ticks
         timestamp_raw = int.from_bytes(slot_data[0:6], byteorder="little")
         timestamp_ms = timestamp_raw * 1000 // 32768
 
-        # V2 bitfield layout (packed uint64_t, little-endian):
-        #   bits 0-47:  timestamp (bytes 0-5)
-        #   bits 48-51: event_encoded (byte 6, bits 0-3)
-        #   bit 52:     was_queued (byte 6, bit 4)
-        #   bit 53:     was_queued_last (byte 6, bit 5)
-        #   bits 54-57: twist_mode_index (byte 6 bits 6-7 + byte 7 bits 0-1)
-        #   bits 58-63: padding (byte 7, bits 2-7)
         flags_byte = slot_data[6]
         event_type = flags_byte & 0x0F
         was_queued = bool(flags_byte & 0x10)
         was_queued_last = bool(flags_byte & 0x20)
 
-        # twist_mode_index spans bytes 6-7: lower 2 bits in byte 6 bits 6-7,
-        # upper 2 bits in byte 7 bits 0-1
-        twist_mode_index = ((flags_byte >> 6) & 0x03) | ((slot_data[7] & 0x03) << 2)
-
         return cls(
             timestamp_ms=timestamp_ms,
             event_type=event_type,
-            twist_mode_index=twist_mode_index,
+            twist_mode_index=0,
             was_queued=was_queued,
             was_queued_last=was_queued_last,
         )
@@ -1474,10 +1471,10 @@ class TwistButtonEventNotification:
 
         events: list[TwistButtonEventV2] = []
 
-        # Parse events in 8-byte slots (V2 format)
-        num_slots = len(event_bytes) // 8
+        # Parse events in 7-byte slots (timestamp + flags, no mode byte)
+        num_slots = len(event_bytes) // 7
         for slot_idx in range(num_slots):
-            slot_data = event_bytes[slot_idx * 8 : (slot_idx + 1) * 8]
+            slot_data = event_bytes[slot_idx * 7 : (slot_idx + 1) * 7]
             events.append(TwistButtonEventV2.from_slot_bytes(slot_data))
 
         return cls(event_count=event_count, events=events)
